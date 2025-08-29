@@ -1,5 +1,8 @@
 // Speech Recognition utilities for MARCO AI Assistant
 
+// Import the necessary types from your local types file
+import { SpeechRecognition, SpeechRecognitionEvent, SpeechRecognitionErrorEvent } from './types'
+
 interface SpeechRecognitionConfig {
   continuous: boolean
   interimResults: boolean
@@ -30,15 +33,16 @@ export class SpeechRecognitionManager {
   private initializeRecognition(): void {
     if (typeof window === 'undefined') return
 
-    // Check for speech recognition support
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    // Get the SpeechRecognition constructor from the window object
+    const SpeechRecognitionInstance = window.SpeechRecognition || window.webkitSpeechRecognition
     
-    if (!SpeechRecognition) {
+    if (!SpeechRecognitionInstance) {
       console.warn('Speech Recognition not supported in this browser')
       return
     }
 
-    this.recognition = new SpeechRecognition()
+    // Explicitly cast the instance to the correct type to resolve the TypeScript error
+    this.recognition = new SpeechRecognitionInstance() as SpeechRecognition
     this.setupRecognition()
   }
 
