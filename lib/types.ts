@@ -3,6 +3,8 @@ declare global {
   interface Window {
     webkitSpeechRecognition: any
     SpeechRecognition: any
+    // Add the missing SpeechGrammarList to the global window type
+    SpeechGrammarList: any
   }
 }
 
@@ -16,8 +18,23 @@ export interface SpeechRecognitionErrorEvent extends Event {
   message: string
 }
 
+// Add the missing SpeechGrammarList interface declaration
+export interface SpeechGrammarList extends EventTarget {
+  addFromString(string: string, weight?: number): void;
+  addFromUri(uri: string, weight?: number): void;
+  item(index: number): SpeechGrammar;
+  readonly length: number;
+}
+
+// You also need a declaration for SpeechGrammar
+export interface SpeechGrammar {
+  src: string;
+  weight: number;
+}
+
 export interface SpeechRecognition extends EventTarget {
   continuous: boolean
+  // Now TypeScript will recognize this type
   grammars: SpeechGrammarList
   interimResults: boolean
   lang: string
