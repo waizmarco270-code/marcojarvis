@@ -2,6 +2,9 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Mic, MicOff, Volume2 } from 'lucide-react'
+import { speechManager, wakeWordDetector } from '@/lib/speech'
+import { speakText } from '@/lib/audio'
+import { ChatMessage } from '@/lib/types'
 
 interface VoiceInterfaceProps {
   isActive: boolean
@@ -30,150 +33,18 @@ export default function VoiceInterface({
   setLastResponse,
   micPermission
 }: VoiceInterfaceProps) {
-  const [recognition, setRecognition] = useState<any>(null)
-  const [isInitialized, setIsInitialized] = useState(false)
-  const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(null)
-  const conversationRef = useRef<Array<{role: string, content: string}>>([])
-  const restartTimeoutRef = useRef<NodeJS.Timeout>()
-
-  // Initialize Speech Recognition
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-
-    // Check for speech recognition support
-    const SpeechRecognition = window.webkitSpeechRecognition || window.SpeechRecognition
-    
-    if (!SpeechRecognition) {
-      console.error('Speech Recognition not supported')
-      return
-    }
-
-    console.log('🎤 Initializing Speech Recognition...')
-
-    const recognitionInstance = new SpeechRecognition()
-    
-    // Configure recognition
-    recognitionInstance.continuous = true
-    recognitionInstance.interimResults = true
-    recognitionInstance.lang = 'en-US'
-    recognitionInstance.maxAlternatives = 1
-
-    // Event handlers
-    recognitionInstance.onstart = () => {
-      console.log('🎤 Speech recognition started')
-      setIsListening(true)
-    }
-
-    recognitionInstance.onend = () => {
-      console.log('🎤 Speech recognition ended')
-      setIsListening(false)
-      
-      // Auto-restart if still active
-      if (isActive) {
-        restartTimeoutRef.current = setTimeout(() => {
-          try {
-            console.log('🔄 Restarting speech recognition...')
-            recognitionInstance.start()
-          } catch (error) {
-            console.log('Recognition restart failed:', error)
-          }
-        }, 500)
-      }
-    }
-
-    recognitionInstance.onerror = (event: any) => {
-      console.error('🚨 Speech recognition error:', event.error)
-      setIsListening(false)
-      
-      if (event.error === 'not-allowed') {
-        alert('Microphone permission denied. Please allow microphone access and refresh the page.')
-      }
-    }
-
-    recognitionInstance.onresult = (event: any) => {
-      let finalTranscript = ''
-      let interimTranscript = ''
-
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript
-        if (event.results[i].isFinal) {
-          finalTranscript += transcript
-        } else {
-          interimTranscript += transcript
-        }
-      }
-
-      const currentTranscript = (finalTranscript || interimTranscript).trim()
-      setTranscript(currentTranscript)
-
-      console.log('📝 Transcript:', currentTranscript)
-
-      // Check for wake word when not active
-      if (!isActive && currentTranscript.toLowerCase().includes('wake up marco')) {
-        console.log('🚀 Wake word detected!')
-        handleWakeWord()
-        return
-      }
-
-      // Handle conversation when active and final
-      if (isActive && finalTranscript && event.results[event.results.length - 1].isFinal) {
-        console.log('💬 Processing final transcript:', finalTranscript)
-        
-        // Check for goodbye
-        if (finalTranscript.toLowerCase().includes('goodbye')) {
-          handleGoodbye()
-          return
-        }
-
-        // Send to chat
-        handleChatMessage(finalTranscript.trim())
-      }
-    }
-
-    setRecognition(recognitionInstance)
-    setIsInitialized(true)
-
-    return () => {
-      if (restartTimeoutRef.current) {
-        clearTimeout(restartTimeoutRef.current)
-      }
-    }
-  }, [isActive])
-
-  // Start/Stop recognition based on state
-  useEffect(() => {
-    if (!recognition || !isInitialized) return
-
-    if (isActive || (!isActive && micPermission === 'granted')) {
-      try {
-        console.log('▶️ Starting speech recognition...')
-        recognition.start()
-      } catch (error) {
-        console.log('Recognition already running or failed to start:', error)
-      }
-    } else {
-      console.log('⏹️ Stopping speech recognition...')
-      recognition.stop()
-      if (restartTimeoutRef.current) {
-        clearTimeout(restartTimeoutRef.current)
-      }
-    }
-
-    return () => {
-      if (recognition && recognition.abort) {
-        recognition.abort()
-      }
-    }
-  }, [isActive, recognition, isInitialized, micPermission])
+  const conversationRef = useRef<ChatMessage[]>([])
+  const recognitionTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   const handleWakeWord = useCallback(async () => {
-    console.log('🔵 Activating MARCO...')
+    console.log('🚀 Wake word detected!')
     setIsActive(true)
     setTranscript('Wake word detected - MARCO is now active')
     
-    // Speak greeting
+    // Speak greeting using centralized utility
     await speakText("Hello Waiz Sama. MARCO is now active. How may I assist you?")
-  }, [])
+    speechManager.updateConfig({ continuous: false })
+  }, [setIsActive, setTranscript])
 
   const handleGoodbye = useCallback(async () => {
     console.log('👋 MARCO shutting down...')
@@ -181,19 +52,20 @@ export default function VoiceInterface({
     setTranscript('')
     conversationRef.current = []
     
+    // Speak shutdown message using centralized utility
     await speakText("Shutting down... Goodbye Waiz Sama")
-  }, [])
+    speechManager.updateConfig({ continuous: true })
+    speechManager.start()
+  }, [setIsActive, setTranscript])
 
   const handleChatMessage = useCallback(async (message: string) => {
     try {
       console.log('🤖 Processing message:', message)
       setTranscript(`Processing: "${message}"`)
 
-      // Add to conversation
-      const newMessage = { role: 'user', content: message }
+      const newMessage: ChatMessage = { role: 'user', content: message }
       conversationRef.current.push(newMessage)
 
-      // Call chat API
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -210,11 +82,9 @@ export default function VoiceInterface({
       const data = await response.json()
       console.log('🤖 MARCO response:', data.message)
 
-      // Add assistant response
       conversationRef.current.push({ role: 'assistant', content: data.message })
       setLastResponse(data.message)
-
-      // Speak the response
+      // Speak the response using the centralized utility
       await speakText(data.message)
 
     } catch (error) {
@@ -222,68 +92,57 @@ export default function VoiceInterface({
       const errorMsg = "I apologize, but I encountered an issue processing your request."
       setLastResponse(errorMsg)
       await speakText(errorMsg)
+    } finally {
+      if (recognitionTimeoutRef.current) {
+        clearTimeout(recognitionTimeoutRef.current);
+      }
+      recognitionTimeoutRef.current = setTimeout(() => {
+        speechManager.start();
+      }, 1000);
     }
-  }, [])
+  }, [setTranscript, setLastResponse])
 
-  const speakText = useCallback(async (text: string) => {
-    try {
-      console.log('🔊 Speaking:', text)
-      setIsSpeaking(true)
+  // Centralized Speech Recognition management
+  useEffect(() => {
+    if (micPermission === 'denied') return
 
-      // Stop current audio
-      if (currentAudio) {
-        currentAudio.pause()
-        currentAudio.currentTime = 0
+    // Setup callbacks
+    speechManager.onStart = () => setIsListening(true)
+    speechManager.onEnd = () => setIsListening(false)
+    speechManager.onResult = (finalTranscript, isFinal) => {
+      setTranscript(finalTranscript)
+      if (isFinal) {
+        // Use the centralized wake word detector
+        if (isActive && wakeWordDetector.detectGoodbye(finalTranscript)) {
+          handleGoodbye()
+        } else if (isActive) {
+          handleChatMessage(finalTranscript)
+        } else if (wakeWordDetector.detectWakeWord(finalTranscript)) {
+          handleWakeWord()
+        }
       }
-
-      // Call TTS API
-      const response = await fetch('/api/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
-      })
-
-      if (!response.ok) {
-        console.error('TTS API error:', response.status)
-        setIsSpeaking(false)
-        return
-      }
-
-      // Create audio
-      const audioBlob = await response.blob()
-      const audioUrl = URL.createObjectURL(audioBlob)
-      const audio = new Audio(audioUrl)
-
-      setCurrentAudio(audio)
-
-      audio.onended = () => {
-        console.log('🔇 Audio playback ended')
-        setIsSpeaking(false)
-        URL.revokeObjectURL(audioUrl)
-        setCurrentAudio(null)
-      }
-
-      audio.onerror = (error) => {
-        console.error('Audio playback error:', error)
-        setIsSpeaking(false)
-        URL.revokeObjectURL(audioUrl)
-        setCurrentAudio(null)
-      }
-
-      await audio.play()
-
-    } catch (error) {
-      console.error('💥 TTS error:', error)
-      setIsSpeaking(false)
-      setCurrentAudio(null)
     }
-  }, [currentAudio])
+    speechManager.onError = (error) => {
+      console.error('🚨 Speech recognition error:', error)
+      setIsListening(false)
+    }
+
+    if (micPermission === 'granted') {
+      speechManager.start()
+    }
+
+    return () => {
+      speechManager.abort()
+      if (recognitionTimeoutRef.current) {
+        clearTimeout(recognitionTimeoutRef.current)
+      }
+    }
+  }, [micPermission, isActive, setTranscript, setIsListening, handleWakeWord, handleGoodbye, handleChatMessage])
 
   const toggleMute = () => {
-    if (currentAudio) {
-      currentAudio.pause()
-      setIsSpeaking(false)
-    }
+    // Calling speakText with no content will stop current playback
+    speakText('')
+    setIsSpeaking(false)
   }
 
   // Show error if mic permission denied
@@ -336,14 +195,12 @@ export default function VoiceInterface({
             {isActive ? '🔵 MARCO is Active - Listening...' : '🎤 Say "Wake up Marco" to activate'}
           </div>
 
-          {/* Debug Info */}
           <div className="text-xs text-gray-500 mb-2">
-            Recognition: {isInitialized ? '✅' : '❌'} | 
+            Recognition: {speechManager.isSupported() ? '✅' : '❌'} | 
             Listening: {isListening ? '🎤' : '🔇'} | 
             Speaking: {isSpeaking ? '🔊' : '🔇'}
           </div>
 
-          {/* Voice Animation */}
           {(isListening || isSpeaking) && (
             <div className="flex items-center justify-center space-x-1 mb-4">
               {[1, 2, 3, 4, 5].map((i) => (
@@ -356,7 +213,6 @@ export default function VoiceInterface({
             </div>
           )}
 
-          {/* Transcript */}
           {transcript && (
             <div className="bg-gray-800/50 rounded-lg p-3 mb-4">
               <div className="text-sm text-gray-400 mb-1">
@@ -366,7 +222,6 @@ export default function VoiceInterface({
             </div>
           )}
 
-          {/* Last Response */}
           {lastResponse && (
             <div className="bg-blue-900/20 border border-blue-500 rounded-lg p-3">
               <div className="text-sm text-blue-400 mb-1">MARCO responded:</div>
@@ -376,7 +231,6 @@ export default function VoiceInterface({
         </div>
       </div>
 
-      {/* Instructions */}
       <div className="text-sm text-gray-400 space-y-2">
         {!isActive ? (
           <>
