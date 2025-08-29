@@ -215,7 +215,7 @@ export default function VoiceInterface({
           }
           handleChatMessage(finalTranscript.trim())
         } else {
-          if (currentTranscript.toLowerCase().includes('wake up marco')) {
+          if (currentTranscript.toLowerCase().includes('marco')) {
             handleWakeWord()
           }
         }
@@ -314,7 +314,7 @@ export default function VoiceInterface({
             isListening ? 'text-green-400' : 
             'text-gray-400'
           }`}>
-            {isActive ? '🔵 MARCO is Active - Listening...' : '🎤 Say "Wake up Marco" to activate'}
+            {isActive ? '🔵 MARCO is Active - Listening...' : '🎤 Say "MARCO" to activate'}
           </div>
 
           {/* Debug Info */}
@@ -361,7 +361,7 @@ export default function VoiceInterface({
       <div className="text-sm text-gray-400 space-y-2">
         {!isActive ? (
           <>
-            <p>🎤 Say <span className="text-blue-400 font-semibold">"Wake up Marco"</span> clearly</p>
+            <p>🎤 Say <span className="text-blue-400 font-semibold">"MARCO"</span> clearly</p>
             <p>🔊 Make sure your microphone is working</p>
           </>
         ) : (
